@@ -124,68 +124,146 @@ class GeometricalAirfoil:
 
         return n
 
-    def offset_foil(self, offset_base, offset_arr=[]):
+    def offset_foil(
+        self,
+        offset_base,
+        offset_arr=[],
+        carbon_length=None,  # カーボンチップ長さ [mm]（コード方向）
+        carbon_depth=0.0,  # カーボン部の「追加」オフセット量
+    ):
         import numpy as np
 
-        # --- 既存ロジックそのまま ---
-        dat = self.dat_extended.copy()
-        depth_arr = np.ones(len(dat)) * offset_base
+        # --- 基本データ ---
+        dat = self.dat_extended.copy()  # [-chord..+chord] 上下面つなげたやつ
+        depth_arr = np.ones(len(dat)) * float(offset_base)
+
+        # =========================================================
+        # ① 既存：プランクなど（下面側だけ） ← 元のロジックを維持
+        # =========================================================
         if len(offset_arr) != 0:
             for i in range(len(offset_arr)):
-                start = np.array(
-                    [
-                        offset_arr[i, 0] * self.chord_ref,
-                        self.y(offset_arr[i, 0] * self.chord_ref),
-                    ]
-                )
-                end = np.array(
-                    [
-                        offset_arr[i, 1] * self.chord_ref,
-                        self.y(offset_arr[i, 1] * self.chord_ref),
-                    ]
-                )
+                start_frac, end_frac, thickness = offset_arr[i]
+
+                x_start = start_frac * self.chord_ref
+                x_end = end_frac * self.chord_ref
+
+                start = np.array([x_start, self.y(x_start)])
+                end = np.array([x_end, self.y(x_end)])
+
                 idx_start = np.searchsorted(dat[:, 0], start[0])
                 idx_end = np.searchsorted(dat[:, 0], end[0])
-                # datに挿入
+
+                # dat に「2点ずつ」挿入して角を作る
                 dat = np.insert(dat, [idx_start, idx_start], [start, start], axis=0)
                 dat = np.insert(dat, [idx_end + 2, idx_end + 2], [end, end], axis=0)
-                # depth行列を更新
+
+                # depth_arr も同じ場所に 0 を挿入してから上書き
                 depth_arr = np.insert(
-                    depth_arr, [idx_start, idx_start, idx_end, idx_end], 0
+                    depth_arr, [idx_start, idx_start, idx_end, idx_end], 0.0
                 )
                 depth_arr[idx_start] = depth_arr[idx_start - 1]
-                depth_arr[idx_start + 1 : idx_end + 3] = offset_arr[i, 2]
+                depth_arr[idx_start + 1 : idx_end + 3] = thickness
                 depth_arr[idx_end + 3] = depth_arr[idx_end + 4]
 
-        # --- 法線を取得して“その点だけ”の反転を適用 ---
-        n = self.nvec(dat[:, 0])  # (N,2) を想定
+        # =========================================================
+        # ② カーボンチップ：上面（x<0）・下面（x>0）両方に「角付き」で入れる
+        # =========================================================
+        if (
+            carbon_length is not None
+            and carbon_length > 0.0
+            and abs(carbon_depth) > 1e-9
+        ):
+            chord = float(self.chord_ref)
+
+            # TE x=chord から前縁側へ carbon_length 戻った位置まで
+            x_end = chord
+            x_start = max(0.0, chord - float(carbon_length))
+
+            # ---------- まず下面側（x>0） ----------
+            lower_start = np.array([x_start, self.y(x_start)])
+            lower_end = np.array([x_end, self.y(x_end)])
+
+            idx_start = np.searchsorted(dat[:, 0], lower_start[0])  # x>0 側
+            idx_end = np.searchsorted(dat[:, 0], lower_end[0])
+
+            dat = np.insert(
+                dat, [idx_start, idx_start], [lower_start, lower_start], axis=0
+            )
+            dat = np.insert(
+                dat, [idx_end + 2, idx_end + 2], [lower_end, lower_end], axis=0
+            )
+
+            depth_arr = np.insert(
+                depth_arr, [idx_start, idx_start, idx_end, idx_end], 0.0
+            )
+
+            # 既存値→カーボン厚→元に戻す、という階段形
+            depth_arr[idx_start] = depth_arr[idx_start - 1]
+            depth_arr[idx_start + 1 : idx_end + 3] = depth_arr[idx_start] + float(
+                carbon_depth
+            )
+            depth_arr[idx_end + 3] = depth_arr[idx_end + 4]
+
+            # ---------- 次に上面側（x<0） ----------
+            # 上面は dat_extended では x が「負側」に並んでいるので、
+            # chordwise の同じ位置は -x_end ～ -x_start に対応
+            x_start = max(0.0, chord - float(carbon_length - 1.55))
+            upper_start = np.array([-x_end, self.y(-x_end)])
+            upper_end = np.array([-x_start, self.y(-x_start)])
+
+            # x の昇順なので、-x_end < -x_start となる：こちらが start / end
+            idx_start_u = np.searchsorted(
+                dat[:, 0], upper_start[0]
+            )  # もっと負側（後縁寄り）
+            idx_end_u = np.searchsorted(
+                dat[:, 0], upper_end[0]
+            )  # 0 に近い側（前縁寄り）
+
+            dat = np.insert(
+                dat, [idx_start_u, idx_start_u], [upper_start, upper_start], axis=0
+            )
+            dat = np.insert(
+                dat, [idx_end_u + 2, idx_end_u + 2], [upper_end, upper_end], axis=0
+            )
+
+            depth_arr = np.insert(
+                depth_arr, [idx_start_u, idx_start_u, idx_end_u, idx_end_u], 0.0
+            )
+
+            depth_arr[idx_start_u] = depth_arr[idx_start_u - 1]
+            depth_arr[idx_start_u + 1 : idx_end_u + 3] = depth_arr[idx_start_u] + float(
+                carbon_depth
+            )
+            depth_arr[idx_end_u + 3] = depth_arr[idx_end_u + 4]
+
+        # =========================================================
+        # ③ 法線方向へオフセット（元のロジック）
+        # =========================================================
+        n = self.nvec(dat[:, 0])  # (N,2) 想定
+
         # 正規化
         n_norm = np.linalg.norm(n, axis=1, keepdims=True)
-        n_norm[n_norm == 0] = 1.0
+        n_norm[n_norm == 0.0] = 1.0
         n = n / n_norm
 
-        # しきい値（cosθ）。これより小さい＝向きが大きく異なる
-        flip_cos_threshold = (
-            0.0  # 90度より大きくズレたら反転（必要に応じて -0.2 等に調整）
-        )
+        # 法線の向きが急にひっくり返っている点だけ反転してならす
+        flip_cos_threshold = 0.0  # 90deg 以上ズレていたら反転
 
         N = len(n)
         if N >= 3:
-            # 前後と比べて“その点だけ”おかしいときに限り、その点だけ反転
             for i in range(1, N - 1):
                 cos_prev = float(np.dot(n[i], n[i - 1]))
                 cos_next = float(np.dot(n[i], n[i + 1]))
-                # 両側と不一致（=外れ値）なら、その点だけ符号反転
                 if (cos_prev < flip_cos_threshold) and (cos_next < flip_cos_threshold):
                     n[i] *= -1.0
         elif N == 2:
-            # 2点しかない場合は前点に合わせて末端だけ調整
             if float(np.dot(n[1], n[0])) < flip_cos_threshold:
                 n[1] *= -1.0
 
-        # --- 以降は元ロジック通り ---
         move = n * depth_arr[:, np.newaxis]
-        dat[:, 0] = np.abs(dat[:, 0])  # 元コード踏襲
+
+        # x は左右対称に畳む元々の仕様
+        dat[:, 0] = np.abs(dat[:, 0])
 
         self.dat_out = dat + move
         return self.dat_out

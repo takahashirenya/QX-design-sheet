@@ -24,7 +24,7 @@ import classes.Config as cf
 from classes.Geometry import GeometricalAirfoil
 
 # ========= 設定 =========
-mode = "lasercut"  # "print", "lasercut", "jig", "stilo_lazer"
+mode = "jig"  # "print", "lasercut", "jig", "stilo_lazer"
 preview = False  # matplotlibでプレビューを表示するか
 all_at_once = False  # 一つの図面/ファイルにまとめるか
 
@@ -183,8 +183,23 @@ def main():
         # リブの段差オフセットを定義
         offset_base = 0 if is_half else ribzai_thickness
         offset_arr = np.array([[plank_start, plank_end, plank_thickness]])
-        # リブオフセット
-        dat_offset = geo.offset_foil(offset_base, offset_arr).copy()
+        # カーボンチップオフセット
+
+        carbon_radius = carbontip_length
+        carbontip_thickness = ribzai_thickness
+
+        if is_half:
+            carbon_radius = None
+            carbontip_thickness = 0
+
+        # リブオフセットプランクとリブ材両方オフセットしている。
+        dat_offset = geo.offset_foil(
+            offset_base,
+            offset_arr,
+            carbon_length=carbon_radius,
+            carbon_depth=carbontip_thickness,
+        ).copy()
+
         # ハーフリブ処理
         if is_half:
             half_x_start = halfline_start * geo.chord_ref
