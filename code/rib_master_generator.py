@@ -24,7 +24,7 @@ import classes.Config as cf
 from classes.Geometry import GeometricalAirfoil
 
 # ========= 設定 =========
-mode = "lasercut"  # "print", "lasercut", "jig", "stilo_lazer"
+mode = "jig"  # "print", "lasercut", "jig", "stilo_lazer"
 preview = False  # matplotlibでプレビューを表示するか
 all_at_once = False  # 一つの図面/ファイルにまとめるか
 
